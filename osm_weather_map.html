@@ -174,6 +174,31 @@
         background: #fff;
       }
 
+      .mode-control {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 6px;
+        margin-top: 10px;
+      }
+
+      .mode-control button {
+        height: 34px;
+        border: 1px solid #cbd5e1;
+        border-radius: 6px;
+        background: #f8fafc;
+        color: #0f172a;
+        cursor: pointer;
+        font: inherit;
+        font-size: 13px;
+      }
+
+      .mode-control button.active {
+        border-color: #2563eb;
+        background: #dbeafe;
+        color: #1e3a8a;
+        font-weight: 700;
+      }
+
       .legend {
         display: grid;
         grid-template-columns: repeat(3, 1fr);
@@ -231,6 +256,27 @@
       .scale span:nth-child(5) {
         background: #1d4ed8;
       }
+
+      .weather-icon {
+        align-items: center;
+        border: 1px solid rgba(15, 23, 42, 0.18);
+        border-radius: 999px;
+        box-shadow: 0 5px 14px rgba(15, 23, 42, 0.2);
+        display: flex;
+        font-size: 18px;
+        height: 34px;
+        justify-content: center;
+        line-height: 1;
+        overflow: hidden;
+        width: 34px;
+      }
+
+      .weather-icon img {
+        display: block;
+        height: 30px;
+        object-fit: contain;
+        width: 30px;
+      }
     </style>
   </head>
   <body>
@@ -239,6 +285,10 @@
       <h1>Bangkok Rain Heatmap</h1>
       <label for="hourSelect">Forecast hour</label>
       <select id="hourSelect"></select>
+      <div class="mode-control" aria-label="Map display mode">
+        <button id="heatmapMode" class="active" type="button">Hue</button>
+        <button id="iconMode" type="button">Icons</button>
+      </div>
       <div class="scale" aria-hidden="true">
         <span></span><span></span><span></span><span></span><span></span>
       </div>
@@ -271,6 +321,10 @@
 
       const hourSelect = document.getElementById("hourSelect");
       const summary = document.getElementById("summary");
+      const heatmapModeButton = document.getElementById("heatmapMode");
+      const iconModeButton = document.getElementById("iconMode");
+      let displayMode = "heatmap";
+
       const HeatmapLayer = L.Layer.extend({
         initialize(points, options = {}) {
           this.points = points;
@@ -349,6 +403,7 @@
       });
 
       let heatmapLayer = new HeatmapLayer([]).addTo(map);
+      const iconLayer = L.layerGroup().addTo(map);
 
       for (const hour of hours) {
         const option = document.createElement("option");
@@ -379,6 +434,111 @@
         return gridCount >= 9 ? 14 : 12;
       }
 
+      function blockIconFor(probability) {
+        if (probability >= 0.8) {
+          return {
+            image: "weather_icons/Thunder%20Storm.png",
+            label: "Thunderstorm risk",
+          };
+        }
+        if (probability >= 0.6) {
+          return {
+            image: "weather_icons/Rain.png",
+            label: "Rain likely",
+          };
+        }
+        if (probability >= 0.35) {
+          return {
+            image: "weather_icons/Cloudly.png",
+            label: "Possible rain",
+          };
+        }
+        return {
+          image: "weather_icons/Sunny.png",
+          label: "Lower rain chance",
+        };
+      }
+
+      function buildIconBlocks(points) {
+        const blocks = new Map();
+        const gridColumns = data.metadata.grid_columns || 21;
+
+        for (const point of points) {
+          const gridRow = Math.floor((point.grid_number - 1) / gridColumns);
+          const gridCol = (point.grid_number - 1) % gridColumns;
+          const blockRow = Math.floor(gridRow / 3);
+          const blockCol = Math.floor(gridCol / 3);
+          const blockId = `${blockRow}-${blockCol}`;
+
+          if (!blocks.has(blockId)) {
+            blocks.set(blockId, {
+              blockId,
+              blockRow,
+              blockCol,
+              latitudeTotal: 0,
+              longitudeTotal: 0,
+              probabilityTotal: 0,
+              maxProbability: 0,
+              minGrid: point.grid_number,
+              maxGrid: point.grid_number,
+              count: 0,
+            });
+          }
+
+          const block = blocks.get(blockId);
+          block.latitudeTotal += point.latitude;
+          block.longitudeTotal += point.longitude;
+          block.probabilityTotal += point.probability;
+          block.maxProbability = Math.max(block.maxProbability, point.probability);
+          block.minGrid = Math.min(block.minGrid, point.grid_number);
+          block.maxGrid = Math.max(block.maxGrid, point.grid_number);
+          block.count += 1;
+        }
+
+        return [...blocks.values()].map((block) => ({
+          ...block,
+          latitude: block.latitudeTotal / block.count,
+          longitude: block.longitudeTotal / block.count,
+          meanProbability: block.probabilityTotal / block.count,
+        }));
+      }
+
+      function renderIcons(points) {
+        iconLayer.clearLayers();
+        const blocks = buildIconBlocks(points);
+
+        for (const block of blocks) {
+          const iconState = blockIconFor(block.meanProbability);
+          const marker = L.marker([block.latitude, block.longitude], {
+            icon: L.divIcon({
+              className: "",
+              html: `<div class="weather-icon" title="${iconState.label}"><img src="${iconState.image}" alt="${iconState.label}" /></div>`,
+              iconSize: [34, 34],
+              iconAnchor: [17, 17],
+            }),
+          });
+
+          marker.bindPopup(`
+            <div class="popup-title">${iconState.label}</div>
+            3x3 block: ${block.blockId}<br />
+            Grids: ${block.minGrid}-${block.maxGrid}<br />
+            Grid count: ${block.count}<br />
+            Mean probability: ${pct(block.meanProbability)}<br />
+            Max probability: ${pct(block.maxProbability)}
+          `);
+          marker.addTo(iconLayer);
+        }
+
+        return blocks;
+      }
+
+      function setDisplayMode(mode) {
+        displayMode = mode;
+        heatmapModeButton.classList.toggle("active", mode === "heatmap");
+        iconModeButton.classList.toggle("active", mode === "icons");
+        render(hourSelect.value);
+      }
+
       function render(hour) {
         const points = data.points.filter(
           (point) => point.predicted_rain_hour === hour,
@@ -396,18 +556,29 @@
           else lowCount += 1;
         }
 
-        heatmapLayer.setPoints(points);
+        let iconBlocks = [];
+        if (displayMode === "heatmap") {
+          if (!map.hasLayer(heatmapLayer)) heatmapLayer.addTo(map);
+          iconLayer.clearLayers();
+          heatmapLayer.setPoints(points);
+        } else {
+          if (map.hasLayer(heatmapLayer)) map.removeLayer(heatmapLayer);
+          iconBlocks = renderIcons(points);
+        }
 
         const avgProbability = points.length
           ? probabilityTotal / points.length
           : 0;
         summary.innerHTML = `
           Grid points shown: ${points.length}<br />
+          Icon blocks: ${displayMode === "icons" ? iconBlocks.length : "hidden"}<br />
           Average probability: ${pct(avgProbability)}<br />
           High grids: ${highCount}, moderate: ${moderateCount}, low: ${lowCount}
         `;
       }
 
+      heatmapModeButton.addEventListener("click", () => setDisplayMode("heatmap"));
+      iconModeButton.addEventListener("click", () => setDisplayMode("icons"));
       hourSelect.addEventListener("change", () => render(hourSelect.value));
       if (hours.length > 0) {
         hourSelect.value = hours[0];
