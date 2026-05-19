@@ -1,0 +1,24 @@
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+.env
+*.log
+
+# Generated prediction outputs can be rebuilt from scripts.
+predictions/
+
+# Keep only selected model artifacts when explicitly staged.
+models/*
+!models/rainfall_probability_spatial_neighbor_model.joblib
+
+# Generated map data used by the demo can be rebuilt, but the current
+# heatmap JS is small enough to keep for the static page demo.
+data/weather_icon_blocks.js
+
+# Legacy exploratory artifacts kept locally but not part of the active repo.
+rainfall_model_readme.md
+rainfall_probability_model.ipynb
+scripts/build_osm_icon_layer.py
+scripts/predict_huai_khwang_balanced_6h.py
+scripts/train_balanced_rain_model.py
+scripts/train_lag_model_predict_6h.py

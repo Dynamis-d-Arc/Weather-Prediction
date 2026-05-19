@@ -1,0 +1,8 @@
+joblib
+matplotlib
+numpy
+pandas
+psycopg2
+scikit-learn
+sqlalchemy
+
